@@ -91,7 +91,12 @@ The original data files for the numbers of called sites are very large. The file
 - File /simulation_SV/mv_survivor_eval.sh This script evaluates the called SVs on simulated data
 
 ## Calling structural variants
-- File /call_SVs/mv_lumpyexpress.sh runs Lumpy on bam files.
+- File /call_SVs/mv_lumpyexpress.sh runs Lumpy on bam files
 - File /call_SVs/mv_delly.sh runs delly on bam files
 - File /call_SVs/mv_pindel.sh runs pindel on bam files
 - File /call_SVs/mv_svaba.sh runs Svaba on bam files
+
+## Simulating and calling CNVs
+- File /call_CNVs/mv_SECNVs.sh runs SECNVs to simulate copy number variation on the reference genome and simulate reads
+- File /call_CNVs/mv_cnvnator.sh uses cnavnator to call CNVs on bam files. The bin size can be modified. In this script bin size is 1670.
+- File /call_CNVs/mv_cnv-seq.sh uses cnv-seq to call CNVs on bam files
