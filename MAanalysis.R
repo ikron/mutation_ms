@@ -3754,7 +3754,280 @@ save_plot(filename = "./mutac_ms/fig/thetares_windows.pdf", finalthetaplot, base
 
 
 save_plot(filename = "./mutac_ms/fig/thetares_new.pdf", final.theta, base_height=3.71, base_width=3.71*1.8*1.618)
-          
+
+### *** Robustness of the model to clumping of zeros
+
+### Running the alternative models (recommend using a cluster here)
+
+load("./mutac_ms/data/thetaW.RData")
+load("./mutac_ms/data/GCmodel.RData")
+
+#Calculate predicted mutation rates for each window
+#nmut ~ offset(log(count)) + Centromere + H3K9 + H3K27 + GC + H3K9:GC,
+#GC content was from 0 to 100 in the model fit
+predmutrate <- GCmodelres[1,1] + GCmodelres[2,1]*theta.chr.all[,7] + GCmodelres[3,1]*theta.chr.all[,8] + GCmodelres[4,1]*theta.chr.all[,10] + GCmodelres[5,1]*theta.chr.all[,6]*100 + GCmodelres[6,1]*theta.chr.all[,6]*100*theta.chr.all[,8]
+
+theta.chr.all$predmut <- predmutrate
+#theta.plot <- filter(theta.chr.all, theta.W > 0) #No filtering of theta = 0 windows
+theta.plot <- theta.chr.all
+colnames(theta.plot)[3] <- "thetaW"
+
+nobs.theta <- nrow(theta.plot) #Number of observations
+
+#OLS regression
+model.theta <- brm(data = theta.plot, family = gaussian,
+                    thetaW ~ 1 + predmut,
+                    prior = c(prior(normal(0, 10), class = b)),
+                    iter = 3000, warmup = 1000, chains = 4, cores = 4)
+
+model.theta.res <- fixef(model.theta) #Model results
+
+theta.rsquare.res <- bayes_R2(model.theta) #Calculate Bayesian R^2
+#Note that R^2 calc takes lot of memory with such a large dataset
+
+#Model prediction for drawing slope
+pred.data <- data.frame(predmut = seq(-10, 0, length.out = 100))
+theta.pred <- data.frame(fitted(model.theta, newdata = pred.data))
+theta.pred$predmut <- pred.data$predmut
+
+#Tobit regression
+theta.plot$censored <- ifelse(theta.plot$thetaW == 0, 'left', 'none') #Censoring variable
+
+model.theta.tobit <- model.theta.tobit <- brm(data = theta.plot, family = gaussian,
+                    thetaW | cens(censored) ~ 1 + predmut,
+                    prior = c(prior(normal(0, 10), class = b)),
+                    iter = 3000, warmup = 1000, chains = 4, cores = 4)
+
+model.tobit.res <- fixef(model.theta.tobit) #Model results
+
+tobit.rsquare.res <- bayes_R2(model.theta.tobit) #Calculate Bayesian R^2
+
+tobit.pred <- data.frame(fitted(model.theta.tobit, newdata = pred.data))
+tobit.pred$predmut <- pred.data$predmut
+
+#Robust tobit
+model.theta.robust <- model.theta.tobit <- brm(data = theta.plot, family = student,
+                    thetaW | cens(censored) ~ 1 + predmut,
+                    prior = c(prior(normal(0, 10), class = b)),
+                    iter = 3000, warmup = 1000, chains = 4, cores = 4)
+
+model.robust.res <- fixef(model.theta.robust) #Model results
+robust.rsquare.res <- bayes_R2(model.theta.robust) #Calc Bayesian R^2
+
+robust.pred <- data.frame(fitted(model.theta.robust, newdata = pred.data))
+robust.pred$predmut <- pred.data$predmut
+
+#Hurdle with lognormal
+model.theta.hurdle <- brm(data = theta.plot, family = hurdle_lognormal,
+                    thetaW ~ 1 + predmut,
+                    #prior = c(prior(normal(0, 10), class = b)),
+                    iter = 3000, warmup = 1000, chains = 4, cores = 4)
+
+model.hurdle.res <- fixef(model.theta.hurdle) #Model results
+hurdle.rsquare.res <- bayes_R2(model.theta.hurdle) #Calc Bayesian R^2
+
+hurdle.pred <- data.frame(fitted(model.theta.hurdle, newdata = pred.data))
+hurdle.pred$predmut <- pred.data$predmut
+hurdle.me <- marginal_effects(model.theta.hurdle, "predmut")
+
+#Save the results
+save(nobs.theta, model.theta.res, theta.rsquare.res, theta.pred, model.tobit.res, tobit.rsquare.res, tobit.pred, model.robust.res, robust.rsquare.res, robust.pred, model.hurdle.res, hurdle.rsquare.res, hurdle.pred, hurdle.me, file = "/scratch/project_2000350/genomics/mutacc/stats/thetaModel_alt.RData")
+
+### Plotting the results
+
+load(file = "~/Documents/tutkijatohtori/epimutation/MA_WGS/thetaW.RData")
+load("./mutac_ms/data/GCmodel.RData")
+load("./mutac_ms/data/thetaModel_alt.RData") #Load data for 200 bp window
+
+#Calculate predicted mutation rates for each window
+#nmut ~ offset(log(count)) + Centromere + H3K9 + H3K27 + GC + H3K9:GC,
+#GC content was from 0 to 100 in the model fit
+predmutrate <- GCmodelres[1,1] + GCmodelres[2,1]*theta.chr.all[,7] + GCmodelres[3,1]*theta.chr.all[,8] + GCmodelres[4,1]*theta.chr.all[,10] + GCmodelres[5,1]*theta.chr.all[,6]*100 + GCmodelres[6,1]*theta.chr.all[,6]*100*theta.chr.all[,8]
+
+theta.chr.all$predmut <- predmutrate
+theta.plot <- theta.chr.all
+colnames(theta.plot)[3] <- "thetaW"
+
+#Model with tobit regression
+myylab <- c(TeX("$\\theta_W$"))
+blabel <- paste0("$\\beta = ", round(model.tobit.res[2,1],4), "\\, \\[", round(model.tobit.res[2,3],4), ", \\, ", round(model.tobit.res[2,4],4), "\\]$")
+r2label <- paste0("$R^2 = ", round(tobit.rsquare.res[1,1],2), "\\, \\[", round(tobit.rsquare.res[1,3],2), ", \\, ", round(tobit.rsquare.res[1,4],2), "\\]$")
+tobit.plot <- ggplot(theta.plot, aes(x = predmut, y = thetaW)) +
+    #geom_point(alpha = 0.05)
+    geom_hex() +
+    scale_fill_viridis_c() +
+    geom_abline(intercept = model.tobit.res[1,1], slope = model.tobit.res[2,1], lwd = 1, color = "blue") +
+    #geom_ribbon(data = theta.pred, aes(x = predmut, y = Estimate, ymin = Q2.5, ymax = Q97.5)) +
+    #geom_smooth(method = "lm") +
+    ggtitle("Tobit regression") +
+    annotate("text", x = -4, y = 0.3 , label = paste("n = ", nobs.theta, sep =""), cex = 4.5) +
+    annotate("text", x = -4, y = 0.28, label = TeX(blabel), cex = 4.5) +
+    annotate("text", x = -4, y = 0.26, label = TeX(r2label), cex = 4.5) +     
+    ylab(myylab) +
+    xlab("log (predicted mutation rate)")
+
+#Model with robust tobit regression
+myylab <- c(TeX("$\\theta_W$"))
+blabel <- paste0("$\\beta = ", round(model.robust.res[2,1],4), "\\, \\[", round(model.robust.res[2,3],4), ", \\, ", round(model.robust.res[2,4],4), "\\]$")
+r2label <- paste0("$R^2 = ", round(robust.rsquare.res[1,1],2), "\\, \\[", round(robust.rsquare.res[1,3],2), ", \\, ", round(robust.rsquare.res[1,4],2), "\\]$")
+robust.plot <- ggplot(theta.plot, aes(x = predmut, y = thetaW)) +
+    #geom_point(alpha = 0.05)
+    geom_hex() +
+    scale_fill_viridis_c() +
+    geom_abline(intercept = model.robust.res[1,1], slope = model.robust.res[2,1], lwd = 1, color = "blue") +
+    #geom_ribbon(data = theta.pred, aes(x = predmut, y = Estimate, ymin = Q2.5, ymax = Q97.5)) +
+    #geom_smooth(method = "lm") +
+    ggtitle("Robust Tobit regression") +
+    annotate("text", x = -4, y = 0.3 , label = paste("n = ", nobs.theta, sep =""), cex = 4.5) +
+    annotate("text", x = -4, y = 0.28, label = TeX(blabel), cex = 4.5) +
+    annotate("text", x = -4, y = 0.26, label = TeX(r2label), cex = 4.5) +     
+    ylab(myylab) +
+    xlab("log (predicted mutation rate)")
+
+#Log-normal hurdle model
+myylab <- c(TeX("$\\theta_W$"))
+#blabel <- paste0("$\\beta = ", round(model.robust.res[2,1],4), "\\, \\[", round(model.robust.res[2,3],4), ", \\, ", round(model.robust.res[2,4],4), "\\]$")
+r2label <- paste0("$R^2 = ", round(hurdle.rsquare.res[1,1],2), "\\, \\[", round(hurdle.rsquare.res[1,3],2), ", \\, ", round(hurdle.rsquare.res[1,4],2), "\\]$")
+hurdle.plot <- ggplot(theta.plot, aes(x = predmut, y = thetaW)) +
+    #geom_point(alpha = 0.05)
+    geom_hex() +
+    scale_fill_viridis_c() +
+    #geom_abline(intercept = model.theta.res[1,1], slope = model.theta.res[2,1], lwd = 1, color = "blue") +
+    geom_line(data = filter(hurdle.pred, predmut > -7.5 & predmut < -2.5), aes(x = predmut, y = Estimate), lwd = 1.5, colour = "blue") +
+    #geom_smooth(method = "lm") +
+    ggtitle("Log-normal hurdle model") +
+    annotate("text", x = -4, y = 0.3 , label = paste("n = ", nobs.theta, sep =""), cex = 4.5) +
+    #annotate("text", x = -4, y = 0.28, label = TeX(blabel), cex = 4.5) +
+    annotate("text", x = -4, y = 0.26, label = TeX(r2label), cex = 4.5) +     
+    ylab(myylab) +
+    xlab("log (predicted mutation rate)")
+
+finalrobust <- plot_grid(tobit.plot, robust.plot, hurdle.plot, ncol = 3)
+save_plot(filename = "./mutac_ms/fig/robust_models.pdf", finalrobust, base_height=3.71*1.25, base_width=3.71*1.618*3)
+
+
+
+### *** Genetic diversity and mutation rate within domains and with / without transitions
+
+#Load data
+
+##Predicted mutation rate and theta
+load("./mutac_ms/data/GCmodel.RData")
+
+#nmut ~ offset(log(count)) + Centromere + H3K9 + H3K27 + GC + H3K9:GC,
+#GC content was from 0 to 100 in the model fit
+predmutrate <- GCmodelres[1,1] + GCmodelres[2,1]*theta.chr.all[,7] + GCmodelres[3,1]*theta.chr.all[,8] + GCmodelres[4,1]*theta.chr.all[,10] + GCmodelres[5,1]*theta.chr.all[,6]*100 + GCmodelres[6,1]*theta.chr.all[,6]*100*theta.chr.all[,8]
+
+load(file = "./mutac_ms/data/thetaW_1000.RData") #All, 1000 bp
+
+theta.chr.all$predmut <- predmutrate
+#theta.plot <- filter(theta.chr.all, theta.W > 0)
+theta.plot <- theta.chr.all
+colnames(theta.plot)[3] <- "thetaW"
+
+theta.plot$Domain <- rep(0, nrow(theta.plot))
+for(i in 1:nrow(theta.plot)) {
+    if(theta.plot$H3K9[i] == 1) {theta.plot$Domain[i] <- "H3K9"}
+    if(theta.plot$centromere[i] == 1) {theta.plot$Domain[i] <- "Centromeric"}
+    if(theta.plot$H3K27exK9[i] == 1) {theta.plot$Domain[i] <- "H3K27"}
+    if(theta.plot$H3K9[i] == 0 & theta.plot$H3K27exK9[i] == 0) {theta.plot$Domain[i] <- "Euchromatic"}
+}
+
+theta.plot.all <- theta.plot #Data for all SNPs, 1000 bp windows
+
+
+load(file = "./mutac_ms/data/thetaW_1000_tv.RData") #Tv only, 1000 bp
+
+theta.chr.all$predmut <- predmutrate
+#theta.plot <- filter(theta.chr.all, theta.W > 0)
+theta.plot <- theta.chr.all
+colnames(theta.plot)[3] <- "thetaW"
+
+theta.plot$Domain <- rep(0, nrow(theta.plot))
+for(i in 1:nrow(theta.plot)) {
+    if(theta.plot$H3K9[i] == 1) {theta.plot$Domain[i] <- "H3K9"}
+    if(theta.plot$centromere[i] == 1) {theta.plot$Domain[i] <- "Centromeric"}
+    if(theta.plot$H3K27exK9[i] == 1) {theta.plot$Domain[i] <- "H3K27"}
+    if(theta.plot$H3K9[i] == 0 & theta.plot$H3K27exK9[i] == 0) {theta.plot$Domain[i] <- "Euchromatic"}
+}
+
+theta.plot.tv <- theta.plot #Data for transversions only, 1000 bp windows
+
+
+#Run the models
+###################################################################
+
+model.theta.all <- brm(data = theta.plot.all, family = gaussian,
+                    thetaW ~ Domain + predmut:Domain,
+                    prior = c(prior(normal(0, 10), class = b)),
+                    iter = 3000, warmup = 1000, chains = 4, cores = 4)
+
+#save(model.theta.all, file = "./mutac_ms/data/thetaModel_1000_domains.RData")
+
+model.theta.tv <- brm(data = theta.plot.tv, family = gaussian,
+                    thetaW ~ Domain + predmut:Domain,
+                    prior = c(prior(normal(0, 10), class = b)),
+                    iter = 3000, warmup = 1000, chains = 4, cores = 4)
+
+#save(model.theta.all, file = "./mutac_ms/data/thetaModel_tv_1000_domains.RData")
+
+#load("./mutac_ms/data/thetaModel_1000_domains.RData")
+#load("./mutac_ms/data/thetaModel_tv_1000_domains.RData")
+
+model.theta.all.res <- fixef(model.theta.all) #Model results
+
+theta.rsquare.all <- bayes_R2(model.theta.all)
+
+model.theta.tv.res <- fixef(model.theta.tv)
+
+theta.rsquare.tv <- bayes_R2(model.theta.tv)
+
+#Make dataframe to store the slopes for plot
+slopes2plot.all <- data.frame(Estimate = model.theta.all.res[5:8,1], lower = model.theta.all.res[5:8,3], upper = model.theta.all.res[5:8,4], Domain = c("Centromeric", "Euchromatic", "H3K27", "H3K9") )
+
+slopes2plot.tv <- data.frame(Estimate = model.theta.tv.res[5:8,1], lower = model.theta.tv.res[5:8,3], upper = model.theta.tv.res[5:8,4], Domain = c("Centromeric", "Euchromatic", "H3K27", "H3K9") )
+
+
+### Does the model explain the amount of natural variation within different domains?
+blabel <- paste0("$\\beta = ")
+myylab <- c(TeX("$\\theta_W$"))
+domains.all.plot <- ggplot(theta.plot.all, aes(x = predmut, y = thetaW)) +
+    #geom_point(alpha = 0.05)
+    geom_hex() +
+    scale_fill_viridis_c() +
+    #geom_abline(intercept = model.theta.res[1,1], slope = model.theta.res[2,1], lwd = 1, color = "blue") +
+    #geom_ribbon(data = theta.pred, aes(x = predmut, y = Estimate, ymin = Q2.5, ymax = Q97.5)) +
+    geom_smooth(method = "lm") +
+    ylab(myylab) +
+    xlab("log (predicted mutation rate)") +
+    annotate("text", x = -6.5, y = 0.125, label = TeX(blabel), cex = 4.5) +
+    geom_text(data = slopes2plot.all, aes(x = -6, y = 0.125, label = round(Estimate,4))) +
+    geom_text(data = slopes2plot.all, aes(x = -4.9, y = 0.125, label = paste0("[",round(lower,4), ", ", round(upper,4), "]"))) +    
+    facet_wrap(~ Domain)
+
+        
+### Does the model amount of natural variation within different domains?
+domains.tv.plot <- ggplot(theta.plot.tv, aes(x = predmut, y = thetaW)) +
+    #geom_point(alpha = 0.05)
+    geom_hex() +
+    scale_fill_viridis_c() +
+    #geom_abline(intercept = model.theta.res[1,1], slope = model.theta.res[2,1], lwd = 1, color = "blue") +
+    #geom_ribbon(data = theta.pred, aes(x = predmut, y = Estimate, ymin = Q2.5, ymax = Q97.5)) +
+    geom_smooth(method = "lm") +
+    ylab(myylab) +
+    xlab("log (predicted mutation rate)") +
+    annotate("text", x = -6.5, y = 0.05, label = TeX(blabel), cex = 4.5) +
+    geom_text(data = slopes2plot.tv, aes(x = -6, y = 0.05, label = round(Estimate,4))) +
+    geom_text(data = slopes2plot.tv, aes(x = -4.8, y = 0.05, label = paste0("[",round(lower,4), ", ", round(upper,4), "]"))) +    
+    facet_wrap(~ Domain)
+
+
+domains.plot2 <- plot_grid(domains.all.plot, domains.tv.plot, nrow = 2, labels = c("A", "B"))
+#save_plot("./mutac_ms/fig/theta_domains.pdf", domains.plot, base_height = 3.71*2, base_width = 3.71*1.618*3)
+
+save_plot("./mutac_ms/fig/theta_domains2.pdf", domains.plot2, base_height = 12, base_width = 9)
+
+
 ### * Reanalysis of data from Wang et al. 2020
 
 ### ** Load the data
